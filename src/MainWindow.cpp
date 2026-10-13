@@ -28,7 +28,7 @@ MainWindow::MainWindow(QWidget *parent)
     verifyOrAcquireFFmpeg();
 
 //  UPDATE THE VERSION NUMBER  #######################################	
-	m_updateChecker = new UpdateChecker("1.0.1", this); // Keep in sync with your releases
+	m_updateChecker = new UpdateChecker("1.1.0", this); // Keep in sync with your releases
     connect(m_updateChecker, &UpdateChecker::updateAvailable, this, &MainWindow::onUpdateAvailable);
 //  UPDATE THE VERSION NUMBER  #######################################	
 
