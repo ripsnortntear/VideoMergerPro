@@ -1,32 +1,43 @@
 #include "FFmpegManager.h"
 #include <QStandardPaths>
+#include <QCoreApplication>
 #include <QDir>
-#include <QProcess>
 #include <QFileInfo>
-#include <QDirIterator>
+#include <QProcess>
 
 FFmpegManager::FFmpegManager(QObject *parent)
-    : QObject(parent) {
-    checkFFmpegAvailability();
-}
+    : QObject(parent) {}
 
 bool FFmpegManager::checkFFmpegAvailability() {
-    QString appLocalDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/FFmpeg/bin";
-    QString localFFmpeg = appLocalDir + "/ffmpeg.exe";
-    QString localFFprobe = appLocalDir + "/ffprobe.exe";
+    // 1. Look adjacent to running executable
+    QString localDir = QCoreApplication::applicationDirPath();
+    QString localFFmpeg = localDir + "/ffmpeg.exe";
+    QString localFFprobe = localDir + "/ffprobe.exe";
 
     if (QFileInfo::exists(localFFmpeg) && QFileInfo::exists(localFFprobe)) {
-        m_ffmpegPath = QDir::toNativeSeparators(localFFmpeg);
-        m_ffprobePath = QDir::toNativeSeparators(localFFprobe);
+        m_ffmpegPath = localFFmpeg;
+        m_ffprobePath = localFFprobe;
         return true;
     }
 
-    QString systemFFmpeg = QStandardPaths::findExecutable("ffmpeg");
-    QString systemFFprobe = QStandardPaths::findExecutable("ffprobe");
+    // 2. Look in AppData bootstrap directory
+    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QString appDataFFmpeg = appData + "/ffmpeg/bin/ffmpeg.exe";
+    QString appDataFFprobe = appData + "/ffmpeg/bin/ffprobe.exe";
 
-    if (!systemFFmpeg.isEmpty() && !systemFFprobe.isEmpty()) {
-        m_ffmpegPath = QDir::toNativeSeparators(systemFFmpeg);
-        m_ffprobePath = QDir::toNativeSeparators(systemFFprobe);
+    if (QFileInfo::exists(appDataFFmpeg) && QFileInfo::exists(appDataFFprobe)) {
+        m_ffmpegPath = appDataFFmpeg;
+        m_ffprobePath = appDataFFprobe;
+        return true;
+    }
+
+    // 3. Fallback to system PATH
+    QString pathFFmpeg = QStandardPaths::findExecutable("ffmpeg");
+    QString pathFFprobe = QStandardPaths::findExecutable("ffprobe");
+
+    if (!pathFFmpeg.isEmpty() && !pathFFprobe.isEmpty()) {
+        m_ffmpegPath = pathFFmpeg;
+        m_ffprobePath = pathFFprobe;
         return true;
     }
 
@@ -42,114 +53,105 @@ QString FFmpegManager::getFFprobePath() const {
 }
 
 void FFmpegManager::downloadAndSetupFFmpeg() {
-    // Official GitHub automated release build of FFmpeg for Windows 64-bit
-    QUrl downloadUrl("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip");
+    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(appData);
 
-    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    m_tempFile.setFileName(tempDir + "/ffmpeg_bootstrap.zip");
+    QString tempZip = appData + "/ffmpeg_setup.zip";
+    m_tempFile.setFileName(tempZip);
+
     if (!m_tempFile.open(QIODevice::WriteOnly)) {
-        emit downloadFinished(false, "Could not create temporary write file: " + m_tempFile.errorString());
+        emit downloadFinished(false, "Failed to open temporary destination file for writing.");
         return;
     }
 
-    QNetworkRequest request(downloadUrl);
+    QUrl url("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip");
+    QNetworkRequest request(url);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
     emit downloadStatus("Connecting to FFmpeg build repository...");
-    m_currentReply = m_netManager.get(request);
+    m_reply = m_netManager.get(request);
 
-    connect(m_currentReply, &QNetworkReply::downloadProgress, this, &FFmpegManager::onDownloadProgress);
-    connect(m_currentReply, &QNetworkReply::readyRead, this, [this]() {
-        if (m_currentReply) {
-            m_tempFile.write(m_currentReply->readAll());
+    connect(m_reply, &QNetworkReply::downloadProgress, this, &FFmpegManager::onDownloadProgress);
+    connect(m_reply, &QNetworkReply::readyRead, this, [this]() {
+        if (m_reply) {
+            m_tempFile.write(m_reply->readAll());
         }
     });
-    connect(m_currentReply, &QNetworkReply::finished, this, &FFmpegManager::onDownloadFinished);
+    connect(m_reply, &QNetworkReply::finished, this, &FFmpegManager::onDownloadFinished);
 }
 
 void FFmpegManager::cancelDownload() {
-    if (m_currentReply && m_currentReply->isRunning()) {
-        m_currentReply->abort();
+    if (m_reply && m_reply->isRunning()) {
+        m_reply->abort();
     }
 }
 
-void FFmpegManager::onDownloadProgress(qint64 received, qint64 total) {
-    emit downloadProgress(received, total);
+void FFmpegManager::onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal) {
+    emit downloadProgress(bytesReceived, bytesTotal);
 }
 
 void FFmpegManager::onDownloadFinished() {
-    if (!m_currentReply) return;
+    if (!m_reply) return;
 
     m_tempFile.close();
 
-    if (m_currentReply->error() != QNetworkReply::NoError) {
-        QString err = m_currentReply->errorString();
-        m_currentReply->deleteLater();
-        m_currentReply = nullptr;
+    if (m_reply->error() != QNetworkReply::NoError) {
+        QString err = m_reply->errorString();
+        m_reply->deleteLater();
+        m_reply = nullptr;
         m_tempFile.remove();
         emit downloadFinished(false, "Download failed: " + err);
         return;
     }
 
-    m_currentReply->deleteLater();
-    m_currentReply = nullptr;
+    m_reply->deleteLater();
+    m_reply = nullptr;
 
-    emit downloadStatus("Extracting binaries via Windows Native Shell...");
+    emit downloadStatus("Extracting FFmpeg binaries...");
 
-    QString targetDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/FFmpeg";
-    QDir().mkpath(targetDir);
+    QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QString extractDir = appData + "/ffmpeg_temp";
+    QDir().mkpath(extractDir);
 
-    // Unpack ZIP archive using PowerShell 5.1+ Expand-Archive
-    QString script = QString(
-        "Expand-Archive -Path '%1' -DestinationPath '%2' -Force"
-    ).arg(QDir::toNativeSeparators(m_tempFile.fileName()), QDir::toNativeSeparators(targetDir));
-
-    QProcess ps;
-    ps.start("powershell.exe", {"-NoProfile", "-NonInteractive", "-Command", script});
-    if (!ps.waitForFinished(180000)) {
+    if (!extractZip(m_tempFile.fileName(), extractDir)) {
         m_tempFile.remove();
-        emit downloadFinished(false, "Extraction timed out after 3 minutes.");
-        return;
-    }
-
-    if (ps.exitStatus() != QProcess::NormalExit || ps.exitCode() != 0) {
-        m_tempFile.remove();
-        emit downloadFinished(false, "Archive extraction failed: " + QString::fromUtf8(ps.readAllStandardError()));
+        emit downloadFinished(false, "Failed to extract FFmpeg archive.");
         return;
     }
 
     m_tempFile.remove();
 
-    // Locate extracted ffmpeg.exe and ffprobe.exe
-    QDirIterator it(targetDir, {"ffmpeg.exe"}, QDir::Files, QDirIterator::Subdirectories);
-    if (!it.hasNext()) {
-        emit downloadFinished(false, "ffmpeg.exe could not be located inside extracted directory.");
+    QDir dir(extractDir);
+    QStringList subdirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    if (subdirs.isEmpty()) {
+        emit downloadFinished(false, "Invalid directory layout in FFmpeg archive.");
         return;
     }
 
-    QString foundFFmpeg = it.next();
-    QString binDir = QFileInfo(foundFFmpeg).absolutePath();
-    QString foundFFprobe = binDir + "/ffprobe.exe";
+    QString targetDir = appData + "/ffmpeg";
+    QDir(targetDir).removeRecursively();
 
-    if (!QFileInfo::exists(foundFFprobe)) {
-        emit downloadFinished(false, "ffprobe.exe could not be located alongside ffmpeg.exe.");
+    QString unpackedRoot = extractDir + "/" + subdirs.first();
+    if (!QDir().rename(unpackedRoot, targetDir)) {
+        emit downloadFinished(false, "Could not move FFmpeg to target location.");
         return;
     }
 
-    QString standardBinDir = targetDir + "/bin";
-    QDir().mkpath(standardBinDir);
-    QString targetFFmpeg = standardBinDir + "/ffmpeg.exe";
-    QString targetFFprobe = standardBinDir + "/ffprobe.exe";
+    QDir(extractDir).removeRecursively();
 
-    QFile::remove(targetFFmpeg);
-    QFile::remove(targetFFprobe);
+    if (checkFFmpegAvailability()) {
+        emit downloadFinished(true, QString());
+    } else {
+        emit downloadFinished(false, "FFmpeg setup concluded, but binaries could not be validated.");
+    }
+}
 
-    QFile::copy(foundFFmpeg, targetFFmpeg);
-    QFile::copy(foundFFprobe, targetFFprobe);
-
-    m_ffmpegPath = QDir::toNativeSeparators(targetFFmpeg);
-    m_ffprobePath = QDir::toNativeSeparators(targetFFprobe);
-
-    emit downloadStatus("FFmpeg successfully verified.");
-    emit downloadFinished(true, QString());
+bool FFmpegManager::extractZip(const QString &zipPath, const QString &destDir) {
+    QProcess tar;
+    tar.start("tar", {"-xf", zipPath, "-C", destDir});
+    if (!tar.waitForStarted(3000)) {
+        return false;
+    }
+    tar.waitForFinished(-1);
+    return (tar.exitStatus() == QProcess::NormalExit && tar.exitCode() == 0);
 }

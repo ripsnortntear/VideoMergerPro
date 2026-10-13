@@ -6,13 +6,13 @@
 #include <QDir>
 #include <QProcess>
 #include <QCoreApplication>
-#include <QRegularExpression>
 
 UpdateChecker::UpdateChecker(QString currentVersion, QObject *parent)
     : QObject(parent)
     , m_currentVersion(std::move(currentVersion)) {}
 
-void UpdateChecker::checkForUpdates() {
+void UpdateChecker::checkForUpdates(bool manual) {
+    m_manualCheck = manual;
     QUrl url(QString("https://api.github.com/repos/%1/releases/latest").arg(m_repoPath));
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::UserAgentHeader, "VideoMergerPro-App");
@@ -67,8 +67,14 @@ void UpdateChecker::onCheckFinished() {
 
             if (!setupUrl.isEmpty() && isNewerVersion(tagName, m_currentVersion)) {
                 emit updateAvailable(tagName, body, setupUrl);
+            } else if (m_manualCheck) {
+                emit upToDate(m_currentVersion);
             }
+        } else if (m_manualCheck) {
+            emit checkFailed("Malformed response from GitHub API.");
         }
+    } else if (m_manualCheck) {
+        emit checkFailed(m_reply->errorString());
     }
 
     m_reply->deleteLater();
@@ -84,7 +90,7 @@ void UpdateChecker::downloadAndInstallUpdate(const QString &downloadUrl, const Q
         return;
     }
 
-    // Using uniform brace initialization avoids C++ most vexing parse
+    // Using uniform brace initialization prevents vexing parse
     QNetworkRequest request{QUrl(downloadUrl)};
     request.setHeader(QNetworkRequest::UserAgentHeader, "VideoMergerPro-App");
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);

@@ -12,8 +12,8 @@ public:
     explicit FFmpegManager(QObject *parent = nullptr);
 
     bool checkFFmpegAvailability();
-    QString getFFmpegPath() const;
-    QString getFFprobePath() const;
+    [[nodiscard]] QString getFFmpegPath() const;
+    [[nodiscard]] QString getFFprobePath() const;
 
     void downloadAndSetupFFmpeg();
     void cancelDownload();
@@ -21,16 +21,18 @@ public:
 signals:
     void downloadProgress(qint64 bytesReceived, qint64 bytesTotal);
     void downloadStatus(const QString &message);
-    void downloadFinished(bool success, const QString &errorString);
+    void downloadFinished(bool success, const QString &errorMessage);
+
+private slots:
+    void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal);
+    void onDownloadFinished();
 
 private:
-    void onDownloadProgress(qint64 received, qint64 total);
-    void onDownloadFinished();
-    bool extractTarXz(const QString &archivePath, const QString &destDir);
+    bool extractZip(const QString &zipPath, const QString &destDir);
 
-    QNetworkAccessManager m_netManager;
-    QNetworkReply *m_currentReply{nullptr};
-    QFile m_tempFile;
     QString m_ffmpegPath;
     QString m_ffprobePath;
+    QNetworkAccessManager m_netManager;
+    QNetworkReply *m_reply{nullptr};
+    QFile m_tempFile;
 };

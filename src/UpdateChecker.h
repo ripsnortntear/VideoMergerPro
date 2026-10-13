@@ -11,12 +11,16 @@ class UpdateChecker : public QObject {
 public:
     explicit UpdateChecker(QString currentVersion, QObject *parent = nullptr);
 
-    void checkForUpdates();
+    void checkForUpdates(bool manual = false);
     void downloadAndInstallUpdate(const QString &downloadUrl, const QString &fileName);
     void cancelDownload();
 
+    [[nodiscard]] QString getCurrentVersion() const { return m_currentVersion; }
+
 signals:
     void updateAvailable(const QString &newVersion, const QString &releaseNotes, const QString &downloadUrl);
+    void upToDate(const QString &currentVersion);
+    void checkFailed(const QString &errorString);
     void downloadProgress(qint64 received, qint64 total);
     void downloadFinished(bool success, const QString &errorString);
 
@@ -31,4 +35,5 @@ private:
     QNetworkAccessManager m_netManager;
     QNetworkReply *m_reply{nullptr};
     QFile m_installerFile;
+    bool m_manualCheck{false};
 };

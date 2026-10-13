@@ -2,12 +2,8 @@
 #include <QMimeData>
 #include <QUrl>
 #include <QDataStream>
-#include <QDirIterator>
 #include <QIODevice>
-
-namespace {
-    constexpr char MIME_INTERNAL[] = "application/x-videomodel-items";
-}
+#include <QDirIterator>
 
 VideoListModel::VideoListModel(QObject *parent)
     : QAbstractListModel(parent) {}
@@ -18,135 +14,86 @@ int VideoListModel::rowCount(const QModelIndex &parent) const {
 }
 
 QVariant VideoListModel::data(const QModelIndex &index, int role) const {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_items.size())
-        return {};
+    if (!index.isValid() || index.row() >= m_items.size()) {
+        return QVariant();
+    }
 
     const auto &item = m_items[index.row()];
+
     if (role == Qt::DisplayRole) {
         double mb = static_cast<double>(item.fileSizeBytes) / (1024.0 * 1024.0);
-        return QString("%1 (%2 MB)\n%3")
+        return QString("%1. %2 (%3 MB)")
+            .arg(index.row() + 1)
             .arg(item.fileName)
-            .arg(QString::number(mb, 'f', 1))
-            .arg(item.filePath);
-    } else if (role == Qt::UserRole) {
+            .arg(mb, 0, 'f', 1);
+    } else if (role == Qt::ToolTipRole) {
         return item.filePath;
     }
-    return {};
+
+    return QVariant();
 }
 
 Qt::ItemFlags VideoListModel::flags(const QModelIndex &index) const {
     Qt::ItemFlags defaultFlags = QAbstractListModel::flags(index);
     if (index.isValid()) {
-        return defaultFlags | Qt::ItemIsDragEnabled | Qt::ItemNeverHasChildren;
+        return defaultFlags | Qt::ItemIsDragEnabled;
     }
     return defaultFlags | Qt::ItemIsDropEnabled;
 }
 
-bool VideoListModel::insertRows(int row, int count, const QModelIndex &parent) {
-    if (parent.isValid() || count <= 0) return false;
-    beginInsertRows(QModelIndex(), row, row + count - 1);
-    for (int i = 0; i < count; ++i) {
-        m_items.insert(row, VideoItem{});
-    }
-    endInsertRows();
-    return true;
-}
-
-bool VideoListModel::removeRows(int row, int count, const QModelIndex &parent) {
-    if (parent.isValid() || count <= 0 || row < 0 || (row + count) > m_items.size())
-        return false;
-    beginRemoveRows(QModelIndex(), row, row + count - 1);
-    m_items.remove(row, count);
-    endRemoveRows();
-    return true;
-}
-
-bool VideoListModel::moveRows(const QModelIndex &sourceParent, int sourceRow, int count,
-                              const QModelIndex &destinationParent, int destinationChild) {
-    if (sourceParent.isValid() || destinationParent.isValid() || count <= 0)
-        return false;
-    if (sourceRow < 0 || sourceRow + count > m_items.size())
-        return false;
-    if (destinationChild < 0 || destinationChild > m_items.size())
-        return false;
-    if (destinationChild >= sourceRow && destinationChild <= sourceRow + count)
-        return false;
-
-    int adjustedDest = destinationChild;
-    if (!beginMoveRows(QModelIndex(), sourceRow, sourceRow + count - 1, QModelIndex(), adjustedDest))
-        return false;
-
-    QList<VideoItem> moved;
-    for (int i = 0; i < count; ++i) {
-        moved.append(m_items.at(sourceRow + i));
-    }
-    m_items.remove(sourceRow, count);
-
-    int insertPos = (destinationChild > sourceRow) ? (destinationChild - count) : destinationChild;
-    for (int i = 0; i < moved.size(); ++i) {
-        m_items.insert(insertPos + i, moved.at(i));
-    }
-
-    endMoveRows();
-    return true;
-}
-
 Qt::DropActions VideoListModel::supportedDropActions() const {
-    return Qt::MoveAction | Qt::CopyAction;
+    return Qt::MoveAction;
 }
 
 QStringList VideoListModel::mimeTypes() const {
-    return {MIME_INTERNAL, "text/uri-list"};
+    return {"application/x-videolist-internal"};
 }
 
 QMimeData *VideoListModel::mimeData(const QModelIndexList &indexes) const {
-    auto *data = new QMimeData();
+    auto *mime = new QMimeData();
     QByteArray encoded;
     QDataStream stream(&encoded, QIODevice::WriteOnly);
+
     for (const auto &idx : indexes) {
         if (idx.isValid()) {
             stream << idx.row();
         }
     }
-    data->setData(MIME_INTERNAL, encoded);
-    return data;
+
+    mime->setData("application/x-videolist-internal", encoded);
+    return mime;
 }
 
-bool VideoListModel::dropMimeData(const QMimeData *data, Qt::DropAction action,
-                                  int row, int column, const QModelIndex &parent) {
+bool VideoListModel::dropMimeData(const QMimeData *data, Qt::DropAction action, int row, int column, const QModelIndex &parent) {
     Q_UNUSED(column);
-    if (action == Qt::IgnoreAction) return true;
+    if (action != Qt::MoveAction) return false;
+    if (!data->hasFormat("application/x-videolist-internal")) return false;
 
-    int targetRow = -1;
-    if (row != -1) targetRow = row;
-    else if (parent.isValid()) targetRow = parent.row();
-    else targetRow = m_items.size();
+    QByteArray encoded = data->data("application/x-videolist-internal");
+    QDataStream stream(&encoded, QIODevice::ReadOnly);
 
-    if (data->hasFormat(MIME_INTERNAL)) {
-        QByteArray encoded = data->data(MIME_INTERNAL);
-        QDataStream stream(&encoded, QIODevice::ReadOnly);
-        QList<int> rows;
-        while (!stream.atEnd()) {
-            int r;
-            stream >> r;
-            rows.append(r);
-        }
-        if (rows.isEmpty()) return false;
-        return moveRows(QModelIndex(), rows.first(), rows.size(), QModelIndex(), targetRow);
+    int sourceRow;
+    stream >> sourceRow;
+
+    if (sourceRow < 0 || sourceRow >= m_items.size()) return false;
+
+    int destRow = row;
+    if (destRow < 0) {
+        destRow = parent.isValid() ? parent.row() : m_items.size();
     }
 
-    if (data->hasUrls()) {
-        QStringList paths;
-        for (const auto &url : data->urls()) {
-            if (url.isLocalFile()) {
-                paths.append(url.toLocalFile());
-            }
-        }
-        addFiles(paths);
-        return true;
+    if (destRow > sourceRow) {
+        destRow--;
     }
 
-    return false;
+    if (destRow == sourceRow) return false;
+
+    beginMoveRows(QModelIndex(), sourceRow, sourceRow, QModelIndex(), destRow > sourceRow ? destRow + 1 : destRow);
+    m_items.move(sourceRow, destRow);
+    endMoveRows();
+
+    emit dataChanged(index(0), index(m_items.size() - 1), {Qt::DisplayRole});
+    return true;
 }
 
 void VideoListModel::addFiles(const QStringList &files) {
@@ -182,9 +129,8 @@ void VideoListModel::addFiles(const QStringList &files) {
         if (!fi.exists()) continue;
 
         if (fi.isDir()) {
-            // Recursively search the directory for video files
-            QDirIterator it(fi.absoluteFilePath(), 
-                            QDir::Files | QDir::Readable, 
+            QDirIterator it(fi.absoluteFilePath(),
+                            QDir::Files | QDir::Readable,
                             QDirIterator::Subdirectories);
             while (it.hasNext()) {
                 it.next();
@@ -202,11 +148,14 @@ void VideoListModel::addFiles(const QStringList &files) {
     endInsertRows();
 }
 
-void VideoListModel::removeAt(int index) {
-    if (index >= 0 && index < m_items.size()) {
-        beginRemoveRows(QModelIndex(), index, index);
-        m_items.removeAt(index);
-        endRemoveRows();
+void VideoListModel::removeAt(int row) {
+    if (row < 0 || row >= m_items.size()) return;
+    beginRemoveRows(QModelIndex(), row, row);
+    m_items.removeAt(row);
+    endRemoveRows();
+
+    if (!m_items.isEmpty()) {
+        emit dataChanged(index(0), index(m_items.size() - 1), {Qt::DisplayRole});
     }
 }
 
@@ -226,6 +175,6 @@ QStringList VideoListModel::getFilePaths() const {
     return paths;
 }
 
-const VideoItem& VideoListModel::getItem(int index) const {
-    return m_items.at(index);
+const VideoItem& VideoListModel::getItem(int row) const {
+    return m_items.at(row);
 }

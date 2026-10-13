@@ -3,15 +3,12 @@ project(VideoMerger LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS
-    Core
-    Gui
     Widgets
     Multimedia
     MultimediaWidgets
@@ -28,14 +25,12 @@ add_executable(VideoMerger WIN32
     src/FFmpegManager.cpp
     src/MergeEngine.h
     src/MergeEngine.cpp
-	src/UpdateChecker.h
+    src/UpdateChecker.h
     src/UpdateChecker.cpp
-	app.rc
+    app.rc
 )
 
 target_link_libraries(VideoMerger PRIVATE
-    Qt6::Core
-    Qt6::Gui
     Qt6::Widgets
     Qt6::Multimedia
     Qt6::MultimediaWidgets

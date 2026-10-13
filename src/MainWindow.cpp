@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QMenuBar>
+#include <QMenu>
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDragEnterEvent>
@@ -14,8 +16,10 @@ MainWindow::MainWindow(QWidget *parent)
     , m_model(new VideoListModel(this))
     , m_player(new QMediaPlayer(this))
     , m_audioOutput(new QAudioOutput(this))
-    , m_ffmpegManager(new FFmpegManager(this)) {
+    , m_ffmpegManager(new FFmpegManager(this))
+    , m_updateChecker(new UpdateChecker("1.1.1", this)) {
     setupUi();
+    setupMenuBar();
     applyStyles();
     setAcceptDrops(true);
 
@@ -25,15 +29,21 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_player, &QMediaPlayer::positionChanged, this, &MainWindow::onMediaPositionChanged);
     connect(m_player, &QMediaPlayer::durationChanged, this, &MainWindow::onMediaDurationChanged);
 
+    connect(m_model, &QAbstractItemModel::rowsInserted, this, &MainWindow::updateQueueSummary);
+    connect(m_model, &QAbstractItemModel::rowsRemoved, this, &MainWindow::updateQueueSummary);
+    connect(m_model, &QAbstractItemModel::modelReset, this, &MainWindow::updateQueueSummary);
+
+    connect(m_updateChecker, &UpdateChecker::updateAvailable, this, &MainWindow::onUpdateAvailable);
+    connect(m_updateChecker, &UpdateChecker::upToDate, this, [this](const QString &ver) {
+        QMessageBox::information(this, "Up to Date", QString("You are running the latest version (v%1).").arg(ver));
+    });
+    connect(m_updateChecker, &UpdateChecker::checkFailed, this, [this](const QString &err) {
+        QMessageBox::warning(this, "Update Check", "Unable to check for updates:\n" + err);
+    });
+
     verifyOrAcquireFFmpeg();
 
-//  UPDATE THE VERSION NUMBER  #######################################	
-	m_updateChecker = new UpdateChecker("1.1.0", this); // Keep in sync with your releases
-    connect(m_updateChecker, &UpdateChecker::updateAvailable, this, &MainWindow::onUpdateAvailable);
-//  UPDATE THE VERSION NUMBER  #######################################	
-
-    // Check quietly in background on launch
-    m_updateChecker->checkForUpdates();
+    m_updateChecker->checkForUpdates(false);
 }
 
 MainWindow::~MainWindow() {
@@ -42,10 +52,22 @@ MainWindow::~MainWindow() {
     }
 }
 
+void MainWindow::setupMenuBar() {
+    auto *menuHelp = menuBar()->addMenu("&Help");
+
+    auto *actCheckUpdates = menuHelp->addAction("Check for Updates...");
+    connect(actCheckUpdates, &QAction::triggered, this, &MainWindow::onCheckForUpdatesTriggered);
+
+    menuHelp->addSeparator();
+
+    auto *actAbout = menuHelp->addAction("About Video Merger Pro");
+    connect(actAbout, &QAction::triggered, this, &MainWindow::onAboutTriggered);
+}
+
 void MainWindow::setupUi() {
     setWindowTitle("Video Merger Pro (Qt 6 / C++20 / FFmpeg)");
     setWindowIcon(QIcon("app_icon.ico"));
-    resize(1024, 720);
+    resize(1060, 750);
 
     auto *central = new QWidget(this);
     setCentralWidget(central);
@@ -56,7 +78,7 @@ void MainWindow::setupUi() {
     auto *contentLayout = new QHBoxLayout();
     contentLayout->setSpacing(16);
 
-    // Left: Reorderable List & Controls
+    // Left Layout
     auto *leftLayout = new QVBoxLayout();
     auto *listLabel = new QLabel("Source Video Clips (Drag to reorder):", this);
     listLabel->setStyleSheet("font-weight: bold; font-size: 13px;");
@@ -71,6 +93,9 @@ void MainWindow::setupUi() {
 
     connect(m_listView->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &MainWindow::onSelectionChanged);
+
+    m_queueSummaryLabel = new QLabel("No clips loaded.", this);
+    m_queueSummaryLabel->setStyleSheet("color: #555; font-size: 12px; padding: 2px;");
 
     auto *listBtnLayout = new QHBoxLayout();
     m_btnAdd = new QPushButton("Add Videos...", this);
@@ -90,9 +115,10 @@ void MainWindow::setupUi() {
 
     leftLayout->addWidget(listLabel);
     leftLayout->addWidget(m_listView);
+    leftLayout->addWidget(m_queueSummaryLabel);
     leftLayout->addLayout(listBtnLayout);
 
-    // Right: Preview Player
+    // Right Layout
     auto *rightLayout = new QVBoxLayout();
     auto *previewLabel = new QLabel("Clip Preview:", this);
     previewLabel->setStyleSheet("font-weight: bold; font-size: 13px;");
@@ -121,7 +147,7 @@ void MainWindow::setupUi() {
     contentLayout->addLayout(rightLayout, 6);
     rootLayout->addLayout(contentLayout, 1);
 
-    // Bottom Area: Destination & Execution
+    // Output Destination
     auto *destLayout = new QHBoxLayout();
     auto *destLabel = new QLabel("Output File:", this);
     destLabel->setStyleSheet("font-weight: bold;");
@@ -136,7 +162,17 @@ void MainWindow::setupUi() {
     destLayout->addWidget(m_btnBrowseOutput);
     rootLayout->addLayout(destLayout);
 
+    // Controls
     auto *actionLayout = new QHBoxLayout();
+
+    auto *presetLabel = new QLabel("Transcode Preset:", this);
+    presetLabel->setStyleSheet("font-weight: bold;");
+
+    m_comboPreset = new QComboBox(this);
+    m_comboPreset->addItem("Fast (Standard)", static_cast<int>(MergeEngine::Preset::Fast));
+    m_comboPreset->addItem("High Quality (Slower)", static_cast<int>(MergeEngine::Preset::HighQuality));
+    m_comboPreset->addItem("Draft (Smaller Size)", static_cast<int>(MergeEngine::Preset::Draft));
+
     m_progressBar = new QProgressBar(this);
     m_progressBar->setRange(0, 100);
     m_progressBar->setValue(0);
@@ -150,6 +186,8 @@ void MainWindow::setupUi() {
     connect(m_btnStartMerge, &QPushButton::clicked, this, &MainWindow::onStartMergeClicked);
     connect(m_btnCancel, &QPushButton::clicked, this, &MainWindow::onCancelClicked);
 
+    actionLayout->addWidget(presetLabel);
+    actionLayout->addWidget(m_comboPreset);
     actionLayout->addWidget(m_progressBar, 1);
     actionLayout->addWidget(m_btnStartMerge);
     actionLayout->addWidget(m_btnCancel);
@@ -160,25 +198,94 @@ void MainWindow::setupUi() {
     rootLayout->addWidget(m_statusLabel);
 }
 
+void MainWindow::updateQueueSummary() {
+    int count = m_model->rowCount();
+    if (count == 0) {
+        m_queueSummaryLabel->setText("No clips loaded.");
+        return;
+    }
+
+    qint64 totalBytes = 0;
+    for (int i = 0; i < count; ++i) {
+        totalBytes += m_model->getItem(i).fileSizeBytes;
+    }
+
+    double mb = static_cast<double>(totalBytes) / (1024.0 * 1024.0);
+    QString sizeStr;
+    if (mb >= 1024.0) {
+        sizeStr = QString::number(mb / 1024.0, 'f', 2) + " GB";
+    } else {
+        sizeStr = QString::number(mb, 'f', 1) + " MB";
+    }
+
+    m_queueSummaryLabel->setText(QString("Total Clips: %1 | Combined Size: %2").arg(count).arg(sizeStr));
+}
+
+void MainWindow::onCheckForUpdatesTriggered() {
+    m_updateChecker->checkForUpdates(true);
+}
+
+void MainWindow::onAboutTriggered() {
+    QMessageBox::about(
+        this,
+        "About Video Merger Pro",
+        QString("<h3>Video Merger Pro v%1</h3>"
+                "<p>Built with C++20 and Qt 6.</p>"
+                "<p>A standalone utility to merge video streams seamlessly using stream-copying "
+                "and dynamic FFmpeg transcoding fallback.</p>"
+                "<p>GitHub: <a href=\"https://github.com/ripsnortntear/VideoMergerPro\">"
+                "ripsnortntear/VideoMergerPro</a></p>")
+                .arg(m_updateChecker->getCurrentVersion())
+    );
+}
+
 void MainWindow::applyStyles() {
     setStyleSheet(R"(
         /* Global Window & Labels */
-        QMainWindow { 
-            background-color: #F8F9FA; 
-        }
-        QLabel {
+        QMainWindow { background-color: #F8F9FA; }
+        QLabel { color: #212529; }
+
+        /* Menu Bar & Dropdown Menus */
+        QMenuBar {
+            background-color: #F8F9FA;
             color: #212529;
+            border-bottom: 1px solid #CED4DA;
+        }
+        QMenuBar::item {
+            background-color: transparent;
+            color: #212529;
+            padding: 4px 10px;
+        }
+        QMenuBar::item:selected {
+            background-color: #E9ECEF;
+            color: #212529;
+            border-radius: 4px;
+        }
+        QMenu {
+            background-color: #FFFFFF;
+            color: #212529;
+            border: 1px solid #CED4DA;
+            padding: 4px;
+        }
+        QMenu::item {
+            background-color: transparent;
+            color: #212529;
+            padding: 6px 24px 6px 12px;
+            border-radius: 3px;
+        }
+        QMenu::item:selected {
+            background-color: #0D6EFD;
+            color: #FFFFFF;
+        }
+        QMenu::separator {
+            height: 1px;
+            background-color: #E9ECEF;
+            margin: 4px 6px;
         }
 
         /* Dialogs & Popups */
-        QMessageBox {
-            background-color: #FFFFFF;
-        }
-        QMessageBox QLabel {
-            color: #212529;
-            background-color: transparent;
-            font-size: 13px;
-        }
+        QMessageBox { background-color: #FFFFFF; }
+        QMessageBox QLabel { color: #212529; font-size: 13px; }
         QMessageBox QPushButton {
             border: 1px solid #CED4DA;
             background-color: #FFFFFF;
@@ -187,9 +294,7 @@ void MainWindow::applyStyles() {
             border-radius: 4px;
             min-width: 70px;
         }
-        QMessageBox QPushButton:hover {
-            background-color: #E9ECEF;
-        }
+        QMessageBox QPushButton:hover { background-color: #E9ECEF; }
 
         /* Source Video List */
         QListView {
@@ -218,16 +323,28 @@ void MainWindow::applyStyles() {
             border-radius: 4px;
             font-weight: 500;
         }
-        QPushButton:hover { 
-            background-color: #E9ECEF; 
-        }
-        QPushButton:pressed {
-            background-color: #DEE2E6;
-        }
+        QPushButton:hover { background-color: #E9ECEF; }
+        QPushButton:pressed { background-color: #DEE2E6; }
         QPushButton:disabled { 
             background-color: #E9ECEF; 
             color: #ADB5BD; 
             border-color: #E9ECEF;
+        }
+
+        /* Combo Box */
+        QComboBox {
+            border: 1px solid #CED4DA;
+            background-color: #FFFFFF;
+            color: #212529;
+            padding: 5px 8px;
+            border-radius: 4px;
+            min-width: 130px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #FFFFFF;
+            color: #212529;
+            selection-background-color: #0D6EFD;
+            selection-color: #FFFFFF;
         }
 
         /* Text Input */
@@ -237,8 +354,6 @@ void MainWindow::applyStyles() {
             color: #212529;
             padding: 6px 8px;
             border-radius: 4px;
-            selection-background-color: #0D6EFD;
-            selection-color: #FFFFFF;
         }
 
         /* Progress Bar */
@@ -423,40 +538,6 @@ void MainWindow::onPlayPauseClicked() {
     }
 }
 
-void MainWindow::onUpdateAvailable(const QString &newVersion, const QString &releaseNotes, const QString &downloadUrl) {
-    QString msg = QString("A new version (%1) of Video Merger Pro is available!\n\n"
-                          "Release Notes:\n%2\n\n"
-                          "Would you like to download and install this update now?")
-                          .arg(newVersion, releaseNotes.isEmpty() ? "Bug fixes and improvements." : releaseNotes);
-
-    auto reply = QMessageBox::question(this, "Update Available", msg, QMessageBox::Yes | QMessageBox::No);
-    if (reply != QMessageBox::Yes) {
-        return;
-    }
-
-    auto *dlg = new QProgressDialog("Downloading update...", "Cancel", 0, 100, this);
-    dlg->setWindowModality(Qt::WindowModal);
-    dlg->setAutoClose(true);
-
-    connect(m_updateChecker, &UpdateChecker::downloadProgress, dlg, [dlg](qint64 received, qint64 total) {
-        if (total > 0) {
-            dlg->setValue(static_cast<int>((received * 100) / total));
-        }
-    });
-
-    connect(dlg, &QProgressDialog::canceled, m_updateChecker, &UpdateChecker::cancelDownload);
-
-    connect(m_updateChecker, &UpdateChecker::downloadFinished, this, [this, dlg](bool ok, const QString &err) {
-        dlg->close();
-        dlg->deleteLater();
-        if (!ok && !err.isEmpty()) {
-            QMessageBox::warning(this, "Update Error", err);
-        }
-    });
-
-    m_updateChecker->downloadAndInstallUpdate(downloadUrl, QString("VideoMergerPro_Setup_%1.exe").arg(newVersion));
-}
-
 void MainWindow::onMediaPositionChanged(qint64 position) {
     if (!m_seekSlider->isSliderDown()) {
         m_seekSlider->setValue(static_cast<int>(position));
@@ -510,6 +591,7 @@ void MainWindow::onStartMergeClicked() {
     m_btnAddFolder->setEnabled(false);
     m_btnRemove->setEnabled(false);
     m_btnClear->setEnabled(false);
+    m_comboPreset->setEnabled(false);
     m_progressBar->setValue(0);
 
     if (m_mergeEngine) {
@@ -537,6 +619,7 @@ void MainWindow::onStartMergeClicked() {
         m_btnAddFolder->setEnabled(true);
         m_btnRemove->setEnabled(true);
         m_btnClear->setEnabled(true);
+        m_comboPreset->setEnabled(true);
 
         if (success) {
             m_statusLabel->setText("Merge operation complete.");
@@ -547,7 +630,8 @@ void MainWindow::onStartMergeClicked() {
         }
     });
 
-    m_mergeEngine->startMerge(files, outPath);
+    auto preset = static_cast<MergeEngine::Preset>(m_comboPreset->currentData().toInt());
+    m_mergeEngine->startMerge(files, outPath, preset);
 }
 
 void MainWindow::onCancelClicked() {
@@ -555,4 +639,38 @@ void MainWindow::onCancelClicked() {
         m_statusLabel->setText("Aborting merge...");
         m_mergeEngine->cancel();
     }
+}
+
+void MainWindow::onUpdateAvailable(const QString &newVersion, const QString &releaseNotes, const QString &downloadUrl) {
+    QString msg = QString("A new version (%1) of Video Merger Pro is available!\n\n"
+                          "Release Notes:\n%2\n\n"
+                          "Would you like to download and install this update now?")
+                          .arg(newVersion, releaseNotes.isEmpty() ? "Bug fixes and improvements." : releaseNotes);
+
+    auto reply = QMessageBox::question(this, "Update Available", msg, QMessageBox::Yes | QMessageBox::No);
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    auto *dlg = new QProgressDialog("Downloading update...", "Cancel", 0, 100, this);
+    dlg->setWindowModality(Qt::WindowModal);
+    dlg->setAutoClose(true);
+
+    connect(m_updateChecker, &UpdateChecker::downloadProgress, dlg, [dlg](qint64 received, qint64 total) {
+        if (total > 0) {
+            dlg->setValue(static_cast<int>((received * 100) / total));
+        }
+    });
+
+    connect(dlg, &QProgressDialog::canceled, m_updateChecker, &UpdateChecker::cancelDownload);
+
+    connect(m_updateChecker, &UpdateChecker::downloadFinished, this, [this, dlg](bool ok, const QString &err) {
+        dlg->close();
+        dlg->deleteLater();
+        if (!ok && !err.isEmpty()) {
+            QMessageBox::warning(this, "Update Error", err);
+        }
+    });
+
+    m_updateChecker->downloadAndInstallUpdate(downloadUrl, QString("VideoMergerPro_Setup_%1.exe").arg(newVersion));
 }

@@ -3,11 +3,11 @@
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
-    app.setApplicationName("VideoMergerPro");
+    app.setApplicationName("Video Merger Pro");
     app.setOrganizationName("MediaTools");
 
-    MainWindow w;
-    w.show();
+    MainWindow window;
+    window.show();
 
     return app.exec();
 }
