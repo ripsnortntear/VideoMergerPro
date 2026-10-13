@@ -2,13 +2,14 @@
 
 An intuitive, high-performance desktop application for Windows built with **C++20** and **Qt 6 (Widgets)** that merges multiple video clips into a single file. 
 
-The application dynamically analyzes incoming media streams: if codecs and formats match, it merges clips instantly via lossless **stream-copying** without re-encoding; if formats or resolutions vary, it standardizes and **transcodes** them into an optimized MP4.
+The application dynamically analyzes incoming media streams: if codecs and formats match, it merges clips instantly via lossless **stream-copying** without re-encoding; if formats or resolutions vary, it standardizes and **transcodes** them into an optimized 1080p MP4.
 
 ---
 
 ## Features
 
-- **Drag-and-Drop Workflow:** Drop individual video files or entire directory trees directly into the queue.
+- **Folder & File Ingestion:** Import files individually, via multi-select, or by dropping entire directory trees directly into the queue.
+- **In-App Auto-Updates:** Automatically queries GitHub Releases on launch and offers seamless in-place updating via Inno Setup.
 - **Visual Reordering:** Reorder your timeline effortlessly using drag-and-drop within the source list.
 - **Embedded Media Preview:** Real-time playback scrubbing powered by Qt Multimedia to inspect clips before merging.
 - **Smart Concat Engine:**
@@ -43,9 +44,9 @@ To build from source on Windows 10/11:
 ## Building from Source
 
 1. Clone the repository:
-```cmd
-   git clone https://github.com/ripsnortntear/video-merger-pro.git
-   cd video-merger-pro
+```
+   git clone [https://github.com/ripsnortntear/VideoMergerPro.git](https://github.com/ripsnortntear/VideoMergerPro.git)
+   cd VideoMergerPro
 ```
 2. Open the x64 Native Tools Command Prompt for Visual Studio.
 
