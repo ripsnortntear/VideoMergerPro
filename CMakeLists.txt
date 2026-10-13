@@ -28,6 +28,8 @@ add_executable(VideoMerger WIN32
     src/FFmpegManager.cpp
     src/MergeEngine.h
     src/MergeEngine.cpp
+	src/UpdateChecker.h
+    src/UpdateChecker.cpp
 	app.rc
 )
 
