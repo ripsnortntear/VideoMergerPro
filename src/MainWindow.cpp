@@ -17,7 +17,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_player(new QMediaPlayer(this))
     , m_audioOutput(new QAudioOutput(this))
     , m_ffmpegManager(new FFmpegManager(this))
-    , m_updateChecker(new UpdateChecker("1.1.1", this)) {
+    , m_updateChecker(new UpdateChecker("1.1.2", this)) {
     setupUi();
     setupMenuBar();
     applyStyles();
@@ -295,6 +295,27 @@ void MainWindow::applyStyles() {
             min-width: 70px;
         }
         QMessageBox QPushButton:hover { background-color: #E9ECEF; }
+		
+		/* Progress Dialog (Updater & Bootstrap) */
+        QProgressDialog {
+            background-color: #FFFFFF;
+            color: #212529;
+        }
+        QProgressDialog QLabel {
+            color: #212529;
+            background-color: transparent;
+            font-size: 13px;
+        }
+        QProgressDialog QPushButton {
+            border: 1px solid #CED4DA;
+            background-color: #FFFFFF;
+            color: #212529;
+            padding: 5px 14px;
+            border-radius: 4px;
+        }
+        QProgressDialog QPushButton:hover {
+            background-color: #E9ECEF;
+        }
 
         /* Source Video List */
         QListView {
@@ -652,13 +673,27 @@ void MainWindow::onUpdateAvailable(const QString &newVersion, const QString &rel
         return;
     }
 
-    auto *dlg = new QProgressDialog("Downloading update...", "Cancel", 0, 100, this);
+    auto *dlg = new QProgressDialog("Connecting to server...", "Cancel", 0, 100, this);
+    dlg->setWindowTitle("Downloading Update");
     dlg->setWindowModality(Qt::WindowModal);
-    dlg->setAutoClose(true);
+    dlg->setMinimumDuration(0);
+    dlg->setValue(0);
+    dlg->setAutoClose(false);
+    dlg->setAutoReset(false);
 
     connect(m_updateChecker, &UpdateChecker::downloadProgress, dlg, [dlg](qint64 received, qint64 total) {
         if (total > 0) {
-            dlg->setValue(static_cast<int>((received * 100) / total));
+            int pct = static_cast<int>((received * 100) / total);
+            dlg->setValue(pct);
+            double mbReceived = static_cast<double>(received) / (1024.0 * 1024.0);
+            double mbTotal = static_cast<double>(total) / (1024.0 * 1024.0);
+            dlg->setLabelText(QString("Downloading update: %1 MB / %2 MB (%3%)")
+                              .arg(mbReceived, 0, 'f', 1)
+                              .arg(mbTotal, 0, 'f', 1)
+                              .arg(pct));
+        } else if (received > 0) {
+            double mbReceived = static_cast<double>(received) / (1024.0 * 1024.0);
+            dlg->setLabelText(QString("Downloaded %1 MB...").arg(mbReceived, 0, 'f', 1));
         }
     });
 
@@ -672,5 +707,6 @@ void MainWindow::onUpdateAvailable(const QString &newVersion, const QString &rel
         }
     });
 
+    dlg->show();
     m_updateChecker->downloadAndInstallUpdate(downloadUrl, QString("VideoMergerPro_Setup_%1.exe").arg(newVersion));
 }

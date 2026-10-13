@@ -90,15 +90,33 @@ void UpdateChecker::downloadAndInstallUpdate(const QString &downloadUrl, const Q
         return;
     }
 
-    // Using uniform brace initialization prevents vexing parse
-    QNetworkRequest request{QUrl(downloadUrl)};
-    request.setHeader(QNetworkRequest::UserAgentHeader, "VideoMergerPro-App");
+    QUrl url(downloadUrl);
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::UserAgentHeader, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VideoMergerPro-Updater");
+    // Ensure Qt follows redirects across domains (GitHub -> AWS S3)
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
+    if (m_reply) {
+        m_reply->deleteLater();
+        m_reply = nullptr;
+    }
+
     m_reply = m_netManager.get(request);
+
+    // Forward SSL and network error diagnostics
+    connect(m_reply, &QNetworkReply::sslErrors, this, [this](const QList<QSslError> &errors) {
+        m_reply->ignoreSslErrors(); // Ignore common Windows trust chain quirks if needed
+    });
+
+    connect(m_reply, &QNetworkReply::errorOccurred, this, [this](QNetworkReply::NetworkError code) {
+        if (m_reply) {
+            emit downloadFinished(false, QString("Network error (%1): %2").arg(code).arg(m_reply->errorString()));
+        }
+    });
+
     connect(m_reply, &QNetworkReply::downloadProgress, this, &UpdateChecker::onDownloadProgress);
     connect(m_reply, &QNetworkReply::readyRead, this, [this]() {
-        if (m_reply) {
+        if (m_reply && m_installerFile.isOpen()) {
             m_installerFile.write(m_reply->readAll());
         }
     });
