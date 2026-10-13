@@ -26,6 +26,14 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_player, &QMediaPlayer::durationChanged, this, &MainWindow::onMediaDurationChanged);
 
     verifyOrAcquireFFmpeg();
+
+//  UPDATE THE VERSION NUMBER  #######################################	
+	m_updateChecker = new UpdateChecker("1.0.1", this); // Keep in sync with your releases
+    connect(m_updateChecker, &UpdateChecker::updateAvailable, this, &MainWindow::onUpdateAvailable);
+//  UPDATE THE VERSION NUMBER  #######################################	
+
+    // Check quietly in background on launch
+    m_updateChecker->checkForUpdates();
 }
 
 MainWindow::~MainWindow() {
@@ -413,6 +421,40 @@ void MainWindow::onPlayPauseClicked() {
         m_player->play();
         m_btnPlayPause->setText("Pause");
     }
+}
+
+void MainWindow::onUpdateAvailable(const QString &newVersion, const QString &releaseNotes, const QString &downloadUrl) {
+    QString msg = QString("A new version (%1) of Video Merger Pro is available!\n\n"
+                          "Release Notes:\n%2\n\n"
+                          "Would you like to download and install this update now?")
+                          .arg(newVersion, releaseNotes.isEmpty() ? "Bug fixes and improvements." : releaseNotes);
+
+    auto reply = QMessageBox::question(this, "Update Available", msg, QMessageBox::Yes | QMessageBox::No);
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    auto *dlg = new QProgressDialog("Downloading update...", "Cancel", 0, 100, this);
+    dlg->setWindowModality(Qt::WindowModal);
+    dlg->setAutoClose(true);
+
+    connect(m_updateChecker, &UpdateChecker::downloadProgress, dlg, [dlg](qint64 received, qint64 total) {
+        if (total > 0) {
+            dlg->setValue(static_cast<int>((received * 100) / total));
+        }
+    });
+
+    connect(dlg, &QProgressDialog::canceled, m_updateChecker, &UpdateChecker::cancelDownload);
+
+    connect(m_updateChecker, &UpdateChecker::downloadFinished, this, [this, dlg](bool ok, const QString &err) {
+        dlg->close();
+        dlg->deleteLater();
+        if (!ok && !err.isEmpty()) {
+            QMessageBox::warning(this, "Update Error", err);
+        }
+    });
+
+    m_updateChecker->downloadAndInstallUpdate(downloadUrl, QString("VideoMergerPro_Setup_%1.exe").arg(newVersion));
 }
 
 void MainWindow::onMediaPositionChanged(qint64 position) {

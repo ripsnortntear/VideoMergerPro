@@ -10,9 +10,10 @@
 #include <QAudioOutput>
 #include <QVideoWidget>
 #include <QSlider>
-#include "VideoListModel.h"
 #include "FFmpegManager.h"
 #include "MergeEngine.h"
+#include "UpdateChecker.h"
+#include "VideoListModel.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -27,16 +28,17 @@ protected:
 private slots:
     void onAddFilesClicked();
 	void onAddFolderClicked();
-    void onRemoveSelectedClicked();
-    void onClearAllClicked();
-    void onBrowseOutputClicked();
-    void onStartMergeClicked();
-    void onCancelClicked();
-    void onSelectionChanged(const QItemSelection &selected, const QItemSelection &deselected);
-    void onPlayPauseClicked();
-    void onMediaPositionChanged(qint64 position);
+	void onBrowseOutputClicked();
+	void onCancelClicked();
+	void onClearAllClicked();
+	void onMediaPositionChanged(qint64 position);
     void onMediaDurationChanged(qint64 duration);
-
+	void onPlayPauseClicked();
+	void onRemoveSelectedClicked();
+	void onSelectionChanged(const QItemSelection &selected, const QItemSelection &deselected);
+	void onStartMergeClicked();
+	void onUpdateAvailable(const QString &newVersion, const QString &releaseNotes, const QString &downloadUrl); 
+	
 private:
     void setupUi();
     void applyStyles();
@@ -67,4 +69,6 @@ private:
 
     FFmpegManager *m_ffmpegManager{nullptr};
     MergeEngine *m_mergeEngine{nullptr};
+	
+	UpdateChecker *m_updateChecker{nullptr};
 };
