@@ -43,6 +43,52 @@ To build from source on Windows 10/11:
 ## Building from Source
 
 1. Clone the repository:
-   ```cmd
+```cmd
    git clone https://github.com/ripsnortntear/video-merger-pro.git
    cd video-merger-pro
+```
+2. Open the x64 Native Tools Command Prompt for Visual Studio.
+
+3. Configure the project with CMake (pointing to your Qt MSVC directory):
+```cmd
+   cmake -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:\Qt\<YOUR_QT_VERSION>\msvc2022_64"
+```
+4. Build the executable:
+```cmd
+  cmake --build build
+```
+5: Deploy Qt runtime dependencies:
+```cmd
+cd build
+C:\Qt\<YOUR_QT_VERSION>\msvc2022_64\bin\windeployqt.exe --release --multimedia --network VideoMerger.exe
+```
+
+6. Run the application:
+```cmd
+VideoMerger.exe
+```
+
+## Creating the Windows Installer
+
+This project includes an Inno Setup script (installer.iss) to produce a single-file .exe installer.
+
+Install Inno Setup 6.
+
+Stage your deployed VideoMerger.exe and Qt dependencies inside C:\VideoMergerApp\.
+
+Compile installer.iss:
+
+```cmd
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+```
+The output setup package will be generated inside C:\Output\.
+
+Technology Stack
+Language: C++20
+GUI Framework: Qt 6 (Widgets, Multimedia)
+Media Engine: FFmpeg & FFprobe
+Build System: CMake & Ninja
+Packaging: Inno Setup 6
+
+License:
+This project is licensed under the GNU General Public License v3.0 (GPLv3). See the LICENSE file for details.
