@@ -45,7 +45,7 @@ To build from source on Windows 10/11:
 
 1. Clone the repository:
 ```
-   git clone [https://github.com/ripsnortntear/VideoMergerPro.git](https://github.com/ripsnortntear/VideoMergerPro.git)
+   git clone https://github.com/ripsnortntear/VideoMergerPro.git
    cd VideoMergerPro
 ```
 2. Open the x64 Native Tools Command Prompt for Visual Studio.
